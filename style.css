@@ -1,0 +1,48 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+}
+
+#screen {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  cursor: crosshair;
+}
+
+#pause {
+  position: fixed;
+  top: 8px;
+  left: 8px;
+  z-index: 2;
+  font: 12px ui-monospace, monospace;
+  color: #39ff88;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid #39ff88;
+  border-radius: 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  animation: blink 0.28s steps(2, end) infinite;
+}
+
+#pause.is-paused {
+  animation: none;
+  color: #ffe14a;
+  border-color: #ffe14a;
+}
+
+@keyframes blink {
+  50% {
+    color: #ff3df0;
+    border-color: #ff3df0;
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #pause {
+    animation: none;
+  }
+}
