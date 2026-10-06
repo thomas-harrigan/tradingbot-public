@@ -12,7 +12,7 @@ var PANEL = "#161a1e";
 var LINE = "#2b3139";
 var TEXT = "#eaecef";
 var MUTED = "#848e9c";
-var BUILD = "wall-8";
+var BUILD = "wall-9";
 
 var SEEDS = [
   ["NVDA", 128.4], ["AAPL", 189.15], ["MSFT", 418.55], ["AMZN", 186.2],

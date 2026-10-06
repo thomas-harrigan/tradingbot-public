@@ -14,11 +14,12 @@ html, body {
 
 #printer {
   position: fixed;
-  right: 12px;
-  bottom: 12px;
+  right: 4px;
+  bottom: 4px;
   z-index: 3;
-  width: 220px;
-  height: auto;
+  width: auto;
+  height: min(460px, 58vh);
+  max-width: 48vw;
   pointer-events: none;
 }
 
@@ -43,6 +44,7 @@ html, body {
 
 @media (max-width: 760px) {
   #printer {
-    width: 148px;
+    height: 230px;
+    max-width: 72vw;
   }
 }
