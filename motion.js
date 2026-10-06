@@ -4,12 +4,25 @@ var canvas = document.getElementById("screen");
 var ctx = canvas.getContext("2d", { alpha: false });
 var pauseBtn = document.getElementById("pause");
 
-var COLORS = ["#39ff88", "#ff3b6a", "#3ee0ff", "#ff3df0", "#ffe14a", "#9b5cff", "#ff7a18"];
-var RGB = COLORS.map(hexToRgb);
-var WORDS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVGO", "MU", "ARM", "SMCI", "PLTR", "COIN", "SPY", "QQQ", "NFLX", "INTC", "BA", "CAT", "ORCL", "CRM", "ADBE", "NOW", "SNOW", "PANW", "CRWD", "DELL", "ASML", "TSM", "QCOM", "AMAT", "LRCX", "KLAC", "SNPS", "CDNS", "UBER", "ABNB", "DIS", "NKE", "COST", "WMT", "HD", "DE", "GE", "HON", "ETN", "ANET", "SHOP", "MELI"];
+var COLORS = ["#39ff88", "#ff3b6a", "#3ee0ff", "#ff3df0", "#ffe14a", "#9b5cff"];
+var WORDS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVGO", "MU", "ARM", "SMCI", "PLTR", "COIN", "SPY", "QQQ", "NFLX", "INTC", "BA", "CAT", "ORCL", "CRM", "ADBE", "NOW", "SNOW", "PANW", "CRWD", "DELL", "ASML", "TSM", "QCOM", "AMAT", "COST", "WMT", "HD", "DE", "GE", "HON", "ANET", "SHOP"];
 var SCALES = [0.42, 1.17, 3.84, 8.6, 18.25, 47.5, 88.4, 126.8, 188.2, 247.15, 412, 891.4, 1420, 2406, 6840, 12850];
-var BUILD = "wall-5";
-var KINDS = ["candles", "bubbles", "bars", "gauges", "radar", "book", "scribble", "meters"];
+var FOCUS = "NVDA";
+var BUILD = "wall-7";
+var TOASTS = [
+  ["Still live?", "The lights are still on.", "Stay"],
+  ["Sync lost", "Nothing was connected.", "Retry"],
+  ["Accept lights", "There is nothing to accept.", "Accept"],
+  ["On top", "This box is covering the panel.", "Close"],
+  ["Are you sure?", "Both buttons do the same thing.", "Yes"],
+  ["Session", "There is no session.", "Continue"]
+];
+var BANNERS = [
+  "Click anywhere to continue",
+  "Click the other button",
+  "This banner does not go away",
+  "Accept to keep watching lights"
+];
 
 var frame = 0;
 var userPaused = false;
@@ -17,24 +30,17 @@ var hidden = document.hidden;
 var raf = 0;
 var W = 1;
 var H = 1;
-var alerts = [];
+var hits = [];
+var candles = [];
+var bars = [];
+var barNow = [];
+var logLines = [];
+var modalHideUntil = 0;
+var toastIx = 0;
+var bannerIx = 0;
+var bookFlash = 0;
+var bills = [];
 var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-function makeLedLayer() {
-  var c = document.createElement("canvas");
-  return { canvas: c, ctx: c.getContext("2d", { alpha: false }), img: null };
-}
-
-var ledMain = makeLedLayer();
-var ledInset = makeLedLayer();
-
-function hexToRgb(hex) {
-  return [
-    parseInt(hex.slice(1, 3), 16),
-    parseInt(hex.slice(3, 5), 16),
-    parseInt(hex.slice(5, 7), 16)
-  ];
-}
 
 function hash(n) {
   var x = Math.imul(n ^ (n >>> 16), 0x7feb352d);
@@ -49,10 +55,9 @@ function unit(a, b) {
 function money(id, salt, f) {
   var scale = SCALES[Math.abs(id + salt * 3) % SCALES.length];
   var slam = unit(id + salt * 11, f);
-  var mult = 0.72 + unit(id * 5 + salt, f + 9) * 0.55;
-  if (slam > 0.9) mult = 6 + unit(id, f + salt) * 18;
-  else if (slam < 0.08) mult = 0.015 + unit(id + 2, f + salt) * 0.05;
-  else if (slam > 0.78) mult = 1.8 + unit(id + 4, f) * 3.2;
+  var mult = 0.82 + unit(id * 5 + salt, f + 9) * 0.36;
+  if (slam > 0.93) mult = 4 + unit(id, f + salt) * 8;
+  else if (slam < 0.06) mult = 0.04 + unit(id + 2, f) * 0.08;
   return scale * mult;
 }
 
@@ -63,8 +68,22 @@ function fmt(v) {
   return v.toFixed(4);
 }
 
-function color(i) {
-  return COLORS[((i % COLORS.length) + COLORS.length) % COLORS.length];
+function rounded(x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), r);
+  else ctx.rect(x, y, Math.max(0, w), Math.max(0, h));
+}
+
+function label(str, x, y, size, fill, align) {
+  ctx.font = "600 " + size + "px ui-monospace, monospace";
+  ctx.fillStyle = fill;
+  ctx.textAlign = align || "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(str, x, y);
+}
+
+function hit(x, y, w, h, fn) {
+  hits.push({ x: x, y: y, w: w, h: h, fn: fn });
 }
 
 function fit() {
@@ -78,208 +97,289 @@ function fit() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function rounded(x, y, w, h, r) {
-  ctx.beginPath();
-  if (ctx.roundRect) ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), r);
-  else ctx.rect(x, y, Math.max(0, w), Math.max(0, h));
+function makeCandle(prevClose, f, i) {
+  var roll = unit(f + i, 11);
+  var delta = (unit(f, i + 2) - 0.5) * 0.07;
+  if (roll > 0.9) delta = (unit(f, i + 4) - 0.5) * 0.32;
+  var open = prevClose;
+  var close = Math.max(0.08, Math.min(0.94, open + delta));
+  if (roll > 0.78 && roll <= 0.9) close = open + (unit(f, i) - 0.5) * 0.012;
+  var wick = roll > 0.66 ? 0.05 + unit(f, i + 6) * 0.16 : 0.008 + unit(f, i + 7) * 0.03;
+  return {
+    o: open,
+    h: Math.min(0.98, Math.max(open, close) + wick),
+    l: Math.max(0.02, Math.min(open, close) - wick * unit(f, i + 8)),
+    c: close
+  };
 }
 
-function drawLeds(layer, x, y, w, h, f) {
-  var cell = 4;
-  var cols = Math.max(1, Math.ceil(w / cell));
-  var rows = Math.max(1, Math.ceil(h / cell));
-  if (layer.canvas.width !== cols || layer.canvas.height !== rows) {
-    layer.canvas.width = cols;
-    layer.canvas.height = rows;
-    layer.img = layer.ctx.createImageData(cols, rows);
-  }
-  var img = layer.img;
-  var data = img.data;
-  var p = 0;
-  for (var yy = 0; yy < rows; yy++) {
-    for (var xx = 0; xx < cols; xx++) {
-      var period = 2 + ((xx * 3 + yy * 5) & 7);
-      var on = ((f + xx * 2 + yy * 3) % period) < (period >> 1) + 1;
-      if (!on) {
-        data[p] = 5;
-        data[p + 1] = 7;
-        data[p + 2] = 14;
-      } else {
-        var rgb = RGB[(xx + yy * 3 + (f >> 2)) % RGB.length];
-        data[p] = rgb[0];
-        data[p + 1] = rgb[1];
-        data[p + 2] = rgb[2];
-      }
-      data[p + 3] = 255;
-      p += 4;
+function seed() {
+  if (!candles.length) {
+    var v = 0.55;
+    var i;
+    for (i = 0; i < 48; i++) {
+      var c = makeCandle(v, i * 3, i);
+      candles.push(c);
+      v = c.c;
     }
   }
-  layer.ctx.putImageData(img, 0, 0);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(layer.canvas, x, y, w, h);
+  if (!bars.length) {
+    var b;
+    for (b = 0; b < 12; b++) {
+      bars.push(0.08 + hash(b + 20) * 0.9);
+      barNow.push(bars[b]);
+    }
+  }
+  if (!logLines.length) {
+    logLines.push("NVDA  " + fmt(188.2));
+    logLines.push("AAPL  " + fmt(226.4));
+    logLines.push("SPY  " + fmt(572));
+  }
 }
 
-function drawTicker(x, y, w, h, dir, f) {
+function step(f) {
+  seed();
+  var last = candles[candles.length - 1];
+  if (f % 7 === 0) {
+    candles.push(makeCandle(last.c, f, candles.length));
+    if (candles.length > 90) candles.shift();
+  } else {
+    var live = last.c + (unit(f, 2) - 0.5) * 0.01;
+    last.c = Math.max(last.l, Math.min(last.h, live));
+  }
+  if (f % 20 === 0) {
+    var k;
+    for (k = 0; k < bars.length; k++) {
+      var roll = unit(f, k + 3);
+      bars[k] = roll < 0.18 ? 0.04 : (roll > 0.82 ? 0.92 + unit(f, k) * 0.08 : 0.15 + roll * 0.7);
+    }
+    bookFlash = f % 8;
+    logLines.push(WORDS[f % WORDS.length] + "  " + fmt(money(f, 4, f >> 3)));
+    if (logLines.length > 40) logLines.shift();
+  }
+  var j;
+  for (j = 0; j < barNow.length; j++) barNow[j] += (bars[j] - barNow[j]) * 0.18;
+}
+
+function layout() {
+  var pad = 8;
+  var gap = 8;
+  var compact = W < 800;
+  var ticker = { x: pad, y: pad, w: W - pad * 2, h: 28 };
+  var pills = { x: pad, y: ticker.y + ticker.h + 6, w: W - pad * 2, h: 30 };
+  var bannerH = compact ? 32 : 36;
+  var logH = compact ? 64 : 78;
+  var banner = { x: pad, y: H - pad - bannerH, w: W - pad * 2, h: bannerH };
+  var log = { x: pad, y: banner.y - 6 - logH, w: W - pad * 2, h: logH };
+  var top = pills.y + pills.h + gap;
+  var bottom = log.y - gap;
+  var avail = Math.max(120, bottom - top);
+
+  if (compact) {
+    var weights = [2.2, 3.2, 2.4, 2.2, 2.4];
+    var sum = 2.2 + 3.2 + 2.4 + 2.2 + 2.4;
+    var gaps = gap * 4;
+    var usable = Math.max(100, avail - gaps);
+    var yy = top;
+    var hs = [];
+    var i;
+    for (i = 0; i < weights.length; i++) hs.push(Math.floor(usable * weights[i] / sum));
+    function take(h) {
+      var r = { x: pad, y: yy, w: W - pad * 2, h: h };
+      yy += h + gap;
+      return r;
+    }
+    return {
+      compact: true,
+      ticker: ticker,
+      pills: pills,
+      price: take(hs[0]),
+      chart: take(hs[1]),
+      bubbles: take(hs[2]),
+      gauges: take(hs[3]),
+      ipad: take(hs[4]),
+      book: null,
+      bars: null,
+      log: log,
+      banner: banner
+    };
+  }
+
+  var topH = Math.floor(avail * 0.4);
+  var midH = Math.floor(avail * 0.28);
+  var botH = avail - topH - midH - gap * 2;
+  var col = Math.floor((W - pad * 2 - gap * 2) / 3);
+  var midY = top + topH + gap;
+  var botY = midY + midH + gap;
+  return {
+    compact: false,
+    ticker: ticker,
+    pills: pills,
+    price: { x: pad, y: top, w: col, h: topH },
+    chart: { x: pad + col + gap, y: top, w: col, h: topH },
+    gauges: { x: pad + (col + gap) * 2, y: top, w: W - pad - (pad + (col + gap) * 2), h: topH },
+    bubbles: { x: pad, y: midY, w: W - pad * 2, h: midH },
+    book: { x: pad, y: botY, w: col, h: botH },
+    bars: { x: pad + col + gap, y: botY, w: col, h: botH },
+    ipad: { x: pad + (col + gap) * 2, y: botY, w: W - pad - (pad + (col + gap) * 2), h: botH },
+    log: log,
+    banner: banner
+  };
+}
+
+function panel(x, y, w, h, title, f, id) {
+  rounded(x, y, w, h, 8);
+  ctx.fillStyle = "#0c1220";
+  ctx.fill();
+  var flash = ((f + id * 13) % 50) < 5;
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = flash ? "#ff3df0" : "#1d4638";
+  ctx.stroke();
+  ctx.fillStyle = "#10182c";
+  ctx.fillRect(x + 1, y + 1, w - 2, 24);
+  var on = ((f + id * 5) % 18) < 9;
+  ctx.fillStyle = on ? COLORS[id % COLORS.length] : "#173028";
+  ctx.beginPath();
+  ctx.arc(x + 14, y + 13, on ? 4.5 : 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  label(title, x + 24, y + 13, 12, "#e7fff4", "left");
+  var px = fmt(money(id, 0, f >> 3));
+  label(px, x + w - 10, y + 13, 12, on ? "#39ff88" : "#9dffc4", "right");
+  return { x: x + 10, y: y + 32, w: Math.max(8, w - 20), h: Math.max(8, h - 42) };
+}
+
+function drawTicker(r, f) {
+  rounded(r.x, r.y, r.w, r.h, 6);
+  ctx.fillStyle = "#080d18";
+  ctx.fill();
   ctx.save();
   ctx.beginPath();
-  ctx.rect(x, y, w, h);
+  ctx.rect(r.x, r.y, r.w, r.h);
   ctx.clip();
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  ctx.fillRect(x, y, w, h);
-  ctx.font = "bold 13px ui-monospace, monospace";
   var chunk = "";
-  var ti;
-  for (ti = 0; ti < 10; ti++) {
-    var sym = WORDS[(f + ti * 3) % WORDS.length];
-    chunk += "   " + sym + " " + fmt(money(ti + dir * 20, ti, f));
-  }
+  var i;
+  for (i = 0; i < WORDS.length; i++) chunk += "   " + WORDS[i] + " " + fmt(money(i, 1, f >> 3));
+  chunk += "   ";
+  ctx.font = "600 13px ui-monospace, monospace";
   var tw = ctx.measureText(chunk).width || 1;
-  var offset = (dir * f * 7) % tw;
-  if (offset > 0) offset -= tw;
-  ctx.fillStyle = color(f + dir);
+  var offset = -((f * 1.6) % tw);
+  var c = ((f % 40) < 8) ? "#ffe14a" : "#8dffe0";
+  ctx.fillStyle = c;
   ctx.textBaseline = "middle";
-  for (var px = offset; px < w + tw; px += tw) {
-    ctx.fillText(chunk, x + px, y + h * 0.55);
-  }
+  var x;
+  for (x = offset; x < r.w + tw; x += tw) ctx.fillText(chunk, r.x + 72 + x, r.y + r.h / 2);
   ctx.restore();
-}
-
-function drawButtons(x, y, w, f) {
-  var labels = ["NVDA", "TSLA", "AAPL", "AMD", "META", "AMZN", "AVGO", "MU"];
-  var gap = 6;
-  var bw = Math.max(36, Math.min(92, (w - gap * labels.length) / labels.length));
-  for (var i = 0; i < labels.length; i++) {
-    var pulse = 1 + 0.12 * Math.sin(f * 0.45 + i);
-    var bx = x + i * (bw + gap);
-    var hot = ((f + i * 3) % 5) === 0;
-    ctx.save();
-    ctx.translate(bx + bw / 2, y + 13);
-    ctx.scale(pulse, pulse);
-    ctx.fillStyle = hot ? color(i + f) : "rgba(8,12,22,0.78)";
-    ctx.strokeStyle = color(i + (f >> 1));
-    ctx.lineWidth = 1.5;
-    rounded(-bw / 2, -12, bw, 24, 5);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = hot ? "#061018" : "#eafff6";
-    ctx.font = "bold 11px ui-monospace, monospace";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(labels[i], 0, 1);
-    ctx.restore();
-  }
-}
-
-function chrome(x, y, w, h, id, f) {
-  var flash = unit(id, f) > 0.55;
-  ctx.fillStyle = flash ? color(id + f) : "rgba(6,10,18,0.62)";
-  ctx.globalAlpha = flash ? 0.55 : 1;
-  rounded(x, y, w, h, 8);
+  var pill = ((f >> 4) % 2 === 0) ? "NO BROKER" : "LIGHTS ONLY";
+  var pw = 118;
+  rounded(r.x + r.w - pw - 6, r.y + 4, pw, r.h - 8, 4);
+  ctx.fillStyle = (f % 24 < 4) ? "#ff3b6a" : "#102033";
   ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = color(id + (f >> 1));
-  ctx.stroke();
-  var dotOn = ((f + id) % 2) === 0;
-  ctx.fillStyle = dotOn ? color(id + f) : "#102018";
-  ctx.beginPath();
-  ctx.arc(x + 11, y + 12, dotOn ? 4.5 : 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.font = "11px ui-monospace, monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "#d9fff0";
-  ctx.fillText(WORDS[id % WORDS.length], x + 20, y + 12);
-  ctx.textAlign = "right";
-  ctx.fillStyle = color(id + f);
-  ctx.fillText(fmt(money(id, 0, f)), x + w - 8, y + 12);
-  ctx.textAlign = "left";
-  return { x: x + 6, y: y + 24, w: Math.max(4, w - 12), h: Math.max(4, h - 30) };
+  label(pill, r.x + r.w - 12, r.y + r.h / 2, 11, "#f4fff8", "right");
 }
 
-function drawCandles(box, id, f) {
-  var density = unit(id, 77);
-  var n;
-  if (density < 0.22) n = 3 + ((id + f) % 3);
-  else if (density > 0.82) n = Math.max(16, Math.floor(box.w / 3));
-  else n = Math.max(5, Math.floor(box.w / (4 + (id % 9))));
-  var cw = box.w / n;
-  var mid = 0.12 + 0.76 * unit(id, 11);
-  for (var i = 0; i < n; i++) {
-    var kind = Math.floor(unit(id * 13 + i * 17, f) * 6);
-    var open = mid;
-    var close = mid;
-    var hi = mid;
-    var lo = mid;
-    if (kind === 0) {
-      open = 0.35 + unit(id + i, f) * 0.3;
-      close = open + (unit(id, f + i) - 0.5) * 0.015;
-      hi = Math.min(0.99, open + 0.28 + 0.55 * unit(id + 2, f + i));
-      lo = Math.max(0.01, open - 0.28 - 0.5 * unit(id + 3, f + i));
-    } else if (kind === 1) {
-      open = unit(id + i, f) < 0.5 ? 0.04 : 0.9;
-      close = open < 0.5 ? 0.88 + unit(id, f + i) * 0.1 : 0.06 + unit(id, f + i) * 0.1;
-      hi = Math.max(open, close) + 0.008;
-      lo = Math.min(open, close) - 0.008;
-    } else if (kind === 2) {
-      lo = 0.03 + unit(id + i, f) * 0.12;
-      open = lo + 0.015;
-      close = lo + 0.03 + unit(id, f + i) * 0.07;
-      hi = 0.72 + unit(id + 4, f + i) * 0.26;
-    } else if (kind === 3) {
-      hi = 0.84 + unit(id + i, f) * 0.14;
-      open = hi - 0.02;
-      close = hi - 0.05 - unit(id, f + i) * 0.08;
-      lo = 0.02 + unit(id + 5, f + i) * 0.16;
-    } else if (kind === 4) {
-      var band = 0.08 + unit(id + i, f + 8) * 0.84;
-      open = band;
-      close = band + (unit(id, f + i) - 0.5) * 0.04;
-      hi = Math.min(0.995, Math.max(open, close) + 0.012);
-      lo = Math.max(0.005, Math.min(open, close) - 0.012);
-    } else {
-      var step = (unit(id + i, f) - 0.5) * (0.05 + 0.62 * unit(id, f + i));
-      if (unit(id + i, f + 3) > 0.84) step = (unit(id, i + f) > 0.5 ? 1 : -1) * (0.28 + 0.4 * unit(id, f));
-      close = Math.max(0.03, Math.min(0.97, open + step));
-      hi = Math.min(0.99, Math.max(open, close) + unit(id + i, f + 1) * (0.02 + 0.45 * unit(id, 19)));
-      lo = Math.max(0.01, Math.min(open, close) - unit(id + i, f + 2) * (0.02 + 0.45 * unit(id, 23)));
-    }
-    mid = Math.max(0.06, Math.min(0.94, close));
-    var up = close >= open;
-    var px = box.x + i * cw + cw * 0.5;
-    var fat = unit(id + i, f + 6);
-    var bodyW = fat > 0.78 ? cw * 0.94 : (fat < 0.16 ? 1.2 : cw * 0.48);
-    ctx.strokeStyle = up ? "#39ff88" : "#ff3b6a";
-    if ((i + id) % 7 === 0) ctx.strokeStyle = up ? "#ffe14a" : "#3ee0ff";
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = fat > 0.9 ? 3 : 1;
+function drawPills(r, f) {
+  var n = r.w < 720 ? 6 : 12;
+  var slot = r.w / n;
+  var i;
+  for (i = 0; i < n; i++) {
+    var on = ((f + i * 7) % (12 + (i % 5))) < 6;
+    var cx = r.x + slot * i + 12;
+    ctx.fillStyle = on ? COLORS[i % COLORS.length] : "#1a2433";
     ctx.beginPath();
-    ctx.moveTo(px, box.y + (1 - Math.max(0, Math.min(1, hi))) * box.h);
-    ctx.lineTo(px, box.y + (1 - Math.max(0, Math.min(1, lo))) * box.h);
-    ctx.stroke();
-    var top = box.y + (1 - Math.max(0, Math.min(1, Math.max(open, close)))) * box.h;
-    var bh = Math.max(kind === 0 || kind === 4 ? 1 : 2, Math.abs(close - open) * box.h);
-    ctx.fillRect(px - bodyW / 2, top, Math.max(1, bodyW), bh);
+    ctx.arc(cx, r.y + r.h / 2, on ? 5 : 3.5, 0, Math.PI * 2);
+    ctx.fill();
+    label(WORDS[i], cx + 10, r.y + r.h / 2, 11, on ? "#f3fff8" : "#7d8b86", "left");
   }
 }
 
-function drawBubbles(box, id, f) {
-  var n = 26;
+function drawPrice(r, f) {
+  var box = panel(r.x, r.y, r.w, r.h, FOCUS, f, 1);
+  var last = candles[candles.length - 1];
+  var prev = candles[candles.length - 2] || last;
+  var up = last.c >= prev.c;
+  var px = (188.2 * (0.62 + last.c * 0.7)).toFixed(2);
+  label(px, box.x, box.y + Math.min(22, box.h * 0.28), Math.min(42, Math.max(22, box.w / 6)), up ? "#39ff88" : "#ff3b6a", "left");
+  label(up ? "UP" : "DOWN", box.x + box.w - 4, box.y + 16, 12, up ? "#39ff88" : "#ff3b6a", "right");
+  var sparkTop = box.y + 36;
+  var sparkBot = box.y + box.h - 22;
+  var spark = { x: box.x, y: sparkTop, w: box.w, h: Math.max(12, sparkBot - sparkTop) };
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(spark.x, spark.y, spark.w, spark.h);
+  ctx.clip();
+  ctx.strokeStyle = up ? "#39ff88" : "#ff3df0";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  var n = Math.min(candles.length, 30);
+  var start = candles.length - n;
+  var i;
+  for (i = 0; i < n; i++) {
+    var x = spark.x + (i / Math.max(1, n - 1)) * spark.w;
+    var y = spark.y + (1 - candles[start + i].c) * spark.h;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.restore();
+  if (box.h > 70) {
+    var stats = ["AAPL", "MSFT", "AMD"];
+    var sw = box.w / 3;
+    for (i = 0; i < 3; i++) {
+      var on = ((f + i * 9) % 16) < 8;
+      label(stats[i] + " " + fmt(money(i + 3, 2, f >> 4)), box.x + sw * i, box.y + box.h - 8, 11, on ? COLORS[i] : "#89a096", "left");
+    }
+  }
+}
+
+function drawChart(r, f) {
+  var box = panel(r.x, r.y, r.w, r.h, "TSLA", f, 2);
+  var n = Math.max(8, Math.min(candles.length, Math.floor(box.w / 9)));
+  var start = candles.length - n;
+  var cw = box.w / n;
+  var i;
+  for (i = 0; i < n; i++) {
+    var c = candles[start + i];
+    var up = c.c >= c.o;
+    var x = box.x + i * cw + cw * 0.5;
+    ctx.strokeStyle = up ? "#39ff88" : "#ff3b6a";
+    if (i % 9 === 0) ctx.strokeStyle = up ? "#ffe14a" : "#3ee0ff";
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, box.y + (1 - c.h) * box.h);
+    ctx.lineTo(x, box.y + (1 - c.l) * box.h);
+    ctx.stroke();
+    var top = box.y + (1 - Math.max(c.o, c.c)) * box.h;
+    var bh = Math.max(2, Math.abs(c.c - c.o) * box.h);
+    ctx.fillRect(x - Math.max(2, cw * 0.28), top, Math.max(3, cw * 0.56), bh);
+  }
+  var sweep = box.x + ((f * 2) % box.w);
+  ctx.strokeStyle = "rgba(62,224,255,0.85)";
+  ctx.beginPath();
+  ctx.moveTo(sweep, box.y);
+  ctx.lineTo(sweep, box.y + box.h);
+  ctx.stroke();
+}
+
+function drawBubbles(r, f) {
+  var box = panel(r.x, r.y, r.w, r.h, "AMD", f, 3);
+  var n = 22;
   var pts = [];
   var i;
   for (i = 0; i < n; i++) {
-    var px = box.x + (0.08 + 0.84 * unit(id + i, 3)) * box.w + Math.sin(f * 0.22 + i + id) * box.w * 0.07;
-    var py = box.y + (0.08 + 0.84 * unit(id + i, 5)) * box.h + Math.cos(f * 0.27 + i * 1.4) * box.h * 0.08;
-    var rad = 2 + unit(id, i + 9) * Math.min(box.w, box.h) * 0.07 * (0.55 + 0.45 * Math.sin(f * 0.35 + i));
-    pts.push([px, py, Math.abs(rad)]);
+    var bx = 0.08 + hash(i * 3 + 2) * 0.84;
+    var by = 0.12 + hash(i * 5 + 1) * 0.76;
+    var x = box.x + bx * box.w + Math.sin(f * 0.03 + i) * 12;
+    var y = box.y + by * box.h + Math.cos(f * 0.025 + i * 1.3) * 8;
+    pts.push([x, y, 3 + hash(i + 11) * 7]);
   }
   ctx.lineWidth = 1;
   for (i = 0; i < n; i++) {
-    if (((f + i + id) & 1) === 0) continue;
     var a = pts[i];
-    var b = pts[(i * 7 + 3) % n];
-    ctx.globalAlpha = 0.85;
-    ctx.strokeStyle = color(i + id + f);
+    var b = pts[(i * 5 + 3) % n];
+    if (((f + i) % 20) <= 3) continue;
+    ctx.strokeStyle = COLORS[(i + Math.floor(f / 12)) % COLORS.length];
+    ctx.globalAlpha = 0.8;
     ctx.beginPath();
     ctx.moveTo(a[0], a[1]);
     ctx.lineTo(b[0], b[1]);
@@ -287,361 +387,332 @@ function drawBubbles(box, id, f) {
   }
   ctx.globalAlpha = 1;
   for (i = 0; i < n; i++) {
-    if (((f + i) % 7) === 0) continue;
-    ctx.fillStyle = color(i + id + (f >> 1));
+    if (((f + i * 4) % 14) <= 2) continue;
+    ctx.fillStyle = COLORS[i % COLORS.length];
     ctx.beginPath();
     ctx.arc(pts[i][0], pts[i][1], pts[i][2], 0, Math.PI * 2);
     ctx.fill();
   }
 }
 
-function drawBars(box, id, f) {
-  var n = Math.max(6, Math.floor(box.w / 8));
-  var bw = box.w / n;
-  for (var i = 0; i < n; i++) {
-    var roll = unit(id + i, f);
-    var h = roll < 0.16 ? 0.012 + roll * 0.04 : (roll > 0.84 ? 0.9 + unit(id, f + i) * 0.1 : 0.08 + roll * 0.7);
-    ctx.fillStyle = i % 2 ? "#ff3df0" : "#39ff88";
-    if (((f + i) & 3) === 0) ctx.fillStyle = "#ffe14a";
-    ctx.fillRect(box.x + i * bw + 1, box.y + box.h - h * box.h, Math.max(1, bw - 2), h * box.h);
-  }
-}
-
-function drawGauges(box, id, f) {
+function drawGauges(r, f) {
+  var box = panel(r.x, r.y, r.w, r.h, "AVGO", f, 4);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
   var n = 3;
   var gw = box.w / n;
-  for (var i = 0; i < n; i++) {
+  var i;
+  for (i = 0; i < n; i++) {
     var cx = box.x + gw * i + gw / 2;
-    var cy = box.y + box.h * 0.62;
-    var rad = Math.max(8, Math.min(gw, box.h) * 0.38);
-    ctx.strokeStyle = "#163028";
-    ctx.lineWidth = 4;
+    var cy = box.y + Math.min(box.h * 0.42, 70);
+    var rad = Math.max(16, Math.min(gw * 0.34, box.h * 0.28));
+    ctx.strokeStyle = "#183228";
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.arc(cx, cy, rad, Math.PI, Math.PI * 2);
+    ctx.arc(cx, cy, rad, Math.PI * 0.15, Math.PI * 0.85, true);
     ctx.stroke();
-    var ang = f * (0.18 + i * 0.07) + id;
-    ctx.strokeStyle = color(id + i + f);
+    var ang = Math.PI + (f * (0.04 + i * 0.02) + i);
+    ctx.strokeStyle = COLORS[i];
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(cx, cy);
-    ctx.lineTo(cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad);
+    ctx.lineTo(cx + Math.cos(ang) * (rad - 2), cy + Math.sin(ang) * (rad - 2));
     ctx.stroke();
-    ctx.fillStyle = color(id + i);
-    ctx.beginPath();
-    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-    ctx.fill();
+    label(WORDS[i + 4], cx, cy + rad + 12, 11, "#d7fff0", "center");
   }
+  var meterY = box.y + box.h - 18;
+  var mw = box.w / bars.length;
+  for (i = 0; i < bars.length; i++) {
+    var h = Math.max(2, barNow[i] * Math.min(36, box.h * 0.22));
+    ctx.fillStyle = (i % 2) ? "#ff3df0" : "#39ff88";
+    if (((f + i) % 30) < 3) ctx.fillStyle = "#ffe14a";
+    ctx.fillRect(box.x + i * mw + 2, meterY - h, Math.max(2, mw - 4), h);
+  }
+  ctx.restore();
 }
 
-function drawRadar(box, id, f) {
-  var cx = box.x + box.w / 2;
-  var cy = box.y + box.h / 2;
-  var rad = Math.max(8, Math.min(box.w, box.h) * 0.46);
-  ctx.strokeStyle = "rgba(57,255,136,0.35)";
-  ctx.lineWidth = 1;
-  for (var ring = 1; ring <= 3; ring++) {
-    ctx.beginPath();
-    ctx.arc(cx, cy, rad * ring / 3, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-  var sweep = f * 0.22 + id;
-  ctx.strokeStyle = "#39ff88";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(sweep) * rad, cy + Math.sin(sweep) * rad);
-  ctx.stroke();
-  for (var i = 0; i < 10; i++) {
-    if (((f + i * 3) % 4) === 0) continue;
-    var bx = cx + (unit(id + i, 2) - 0.5) * rad * 1.6;
-    var by = cy + (unit(id + i, 4) - 0.5) * rad * 1.6;
-    ctx.fillStyle = color(i + f);
-    ctx.beginPath();
-    ctx.arc(bx, by, 2 + (i % 3), 0, Math.PI * 2);
-    ctx.fill();
-  }
-}
-
-function drawBook(box, id, f) {
-  var rows = Math.max(3, Math.floor(box.h / 14));
+function drawBook(r, f) {
+  if (!r) return;
+  var box = panel(r.x, r.y, r.w, r.h, "META", f, 5);
+  var rows = Math.max(3, Math.floor(box.h / 18));
   var rh = box.h / rows;
-  ctx.font = "11px ui-monospace, monospace";
-  ctx.textBaseline = "middle";
-  for (var i = 0; i < rows; i++) {
-    var hot = ((f + i + id) % 3) === 0;
-    ctx.fillStyle = hot ? (i % 2 ? "rgba(255,59,106,0.85)" : "rgba(57,255,136,0.8)") : "rgba(0,0,0,0.25)";
-    ctx.fillRect(box.x, box.y + i * rh, box.w, rh - 1);
-    ctx.fillStyle = hot ? "#061018" : color(i + f);
-    var left = WORDS[(id + i * 5) % WORDS.length];
-    ctx.textAlign = "left";
-    ctx.fillText(left, box.x + 4, box.y + i * rh + rh / 2);
-    ctx.textAlign = "right";
-    ctx.fillText(fmt(money(id + i, i + 2, f)), box.x + box.w - 4, box.y + i * rh + rh / 2);
-  }
-  ctx.textAlign = "left";
-}
-
-function drawScribble(box, id, f) {
-  for (var line = 0; line < 4; line++) {
-    ctx.beginPath();
-    ctx.strokeStyle = color(id + line + f);
-    ctx.lineWidth = 1.5;
-    var steps = 28;
-    for (var i = 0; i <= steps; i++) {
-      var px = box.x + (i / steps) * box.w;
-      var py = box.y + unit(id * 9 + line * 20 + i, f) * box.h;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.stroke();
-  }
-}
-
-function drawMeters(box, id, f) {
-  var n = 5;
-  var mw = box.w / n;
-  for (var i = 0; i < n; i++) {
-    var level = unit(id + i, f);
-    ctx.fillStyle = "#102018";
-    ctx.fillRect(box.x + i * mw + 3, box.y, mw - 6, box.h);
-    ctx.fillStyle = color(i + id + (f >> 1));
-    ctx.fillRect(box.x + i * mw + 3, box.y + box.h * (1 - level), mw - 6, box.h * level);
-    if (((f + i) & 2) === 0) {
-      ctx.fillStyle = "#ffffff";
-      ctx.globalAlpha = 0.35;
-      ctx.fillRect(box.x + i * mw + 3, box.y + box.h * (1 - level), mw - 6, 2);
-      ctx.globalAlpha = 1;
-    }
-  }
-}
-
-function drawWidget(kind, x, y, w, h, id, f) {
-  if (w < 20 || h < 20) return;
-  var box = chrome(x, y, w, h, id, f);
-  if (kind === "candles") drawCandles(box, id, f);
-  else if (kind === "bubbles") drawBubbles(box, id, f);
-  else if (kind === "bars") drawBars(box, id, f);
-  else if (kind === "gauges") drawGauges(box, id, f);
-  else if (kind === "radar") drawRadar(box, id, f);
-  else if (kind === "book") drawBook(box, id, f);
-  else if (kind === "scribble") drawScribble(box, id, f);
-  else drawMeters(box, id, f);
-}
-
-function drawLog(x, y, w, h, f) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(x, y, w, h);
-  ctx.font = "12px ui-monospace, monospace";
-  ctx.textBaseline = "top";
-  var line = 14;
-  var scroll = (f * 4) % line;
-  var rows = Math.ceil(h / line) + 2;
-  for (var i = 0; i < rows; i++) {
-    var id = f + i;
-    var yy = y + i * line - scroll;
-    ctx.fillStyle = color(id);
-    var a = WORDS[id % WORDS.length];
-    var b = WORDS[(id * 3) % WORDS.length];
-    ctx.fillText(a + "  " + fmt(money(id, i, f)) + "  " + b + "  " + fmt(money(id + 9, i, f)), x + 8, yy);
-  }
-  ctx.restore();
-}
-
-function spawnAlerts(f) {
-  if ((f % 4) === 0) {
-    alerts.push({
-      x: unit(f, 1) * W,
-      y: unit(f, 2) * H * 0.8,
-      life: 22 + (f % 18),
-      word: WORDS[f % WORDS.length],
-      n: fmt(money(f, 4, f)),
-      c: color(f)
-    });
-  }
   var i;
-  for (i = alerts.length - 1; i >= 0; i--) {
-    alerts[i].life -= 1;
-    alerts[i].x += Math.sin(f * 0.8 + i) * 4;
-    if (alerts[i].life <= 0) alerts.splice(i, 1);
-  }
-  if (alerts.length > 36) alerts.splice(0, alerts.length - 36);
-}
-
-function drawAlerts() {
-  ctx.font = "bold 12px ui-monospace, monospace";
-  ctx.textBaseline = "middle";
-  for (var i = 0; i < alerts.length; i++) {
-    var a = alerts[i];
-    var bw = 148;
-    var bh = 28;
-    ctx.globalAlpha = Math.max(0.25, a.life / 30);
-    ctx.fillStyle = a.c;
-    rounded(a.x, a.y, bw, bh, 4);
-    ctx.fill();
-    ctx.fillStyle = "#061018";
+  ctx.font = "600 12px ui-monospace, monospace";
+  for (i = 0; i < rows; i++) {
+    var hot = bookFlash === (i % 8) && (f % 24) < 10;
+    ctx.fillStyle = hot ? (i % 2 ? "rgba(255,59,106,0.9)" : "rgba(57,255,136,0.85)") : "rgba(255,255,255,0.03)";
+    ctx.fillRect(box.x, box.y + i * rh, box.w, rh - 2);
+    ctx.fillStyle = hot ? "#081018" : (i % 2 ? "#ff8aa3" : "#9dffc4");
     ctx.textAlign = "left";
-    ctx.fillText(a.word + "  " + a.n, a.x + 8, a.y + bh / 2);
-    ctx.globalAlpha = 1;
+    ctx.textBaseline = "middle";
+    ctx.fillText(WORDS[(i * 3) % WORDS.length], box.x + 4, box.y + i * rh + rh / 2);
+    ctx.textAlign = "right";
+    ctx.fillText(fmt(money(i + 6, 2, (f >> 4) + i)), box.x + box.w - 4, box.y + i * rh + rh / 2);
   }
 }
 
-function drawTerminal(x, y, w, h, f, nested) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-
-  drawLeds(nested ? ledInset : ledMain, x, y, w, h, f);
-  drawTicker(x, y, w, 18, 1, f);
-  drawTicker(x, y + h - 16, w, 16, -1, f);
-
-  var top = y + 22;
-  var bottom = y + h - 20;
-  if (h > 230 && w > 280) {
-    drawButtons(x + 8, top, Math.min(w - 16, 820), f);
-    top += 32;
+function drawBars(r, f) {
+  if (!r) return;
+  var box = panel(r.x, r.y, r.w, r.h, "AMZN", f, 6);
+  var n = Math.min(barNow.length, 10);
+  var bw = box.w / n;
+  var i;
+  for (i = 0; i < n; i++) {
+    var h = Math.max(4, barNow[i] * box.h);
+    ctx.fillStyle = COLORS[i % COLORS.length];
+    ctx.fillRect(box.x + i * bw + 3, box.y + box.h - h, Math.max(3, bw - 6), h);
   }
-  if (h > 300) {
-    drawLog(x, bottom - 62, w, 58, f);
-    bottom -= 66;
-  }
-
-  var gridH = Math.max(40, bottom - top);
-  var cols = Math.max(2, Math.floor(w / (nested ? 120 : 170)));
-  var rows = Math.max(2, Math.floor(gridH / (nested ? 90 : 120)));
-  var cw = w / cols;
-  var rh = gridH / rows;
-  var pad = 5;
-  for (var r = 0; r < rows; r++) {
-    for (var c = 0; c < cols; c++) {
-      var id = r * cols + c + (nested ? 80 : 0);
-      var kind = KINDS[id % KINDS.length];
-      var px = x + c * cw + pad;
-      var py = top + r * rh + pad;
-      drawWidget(kind, px, py, Math.max(8, cw - pad * 2), Math.max(8, rh - pad * 2), id, f);
-    }
-  }
-
-  if (!nested) {
-    spawnAlerts(f);
-    drawAlerts();
-    drawIpad(f);
-    drawStatus(f);
-  }
-  ctx.restore();
 }
 
-function drawIpad(f) {
-  var iw = Math.max(220, Math.min(520, W * 0.4));
-  var ih = Math.max(160, Math.min(340, H * 0.42));
-  var cx = W * 0.72;
-  var cy = H * 0.56;
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.fillStyle = "#141820";
-  ctx.strokeStyle = (f % 6 === 0) ? "#ff3df0" : "#3c4454";
+function drawIpad(r, f) {
+  rounded(r.x, r.y, r.w, r.h, 16);
+  ctx.fillStyle = "#171b22";
+  ctx.fill();
   ctx.lineWidth = 3;
-  rounded(-iw / 2 - 16, -ih / 2 - 18, iw + 32, ih + 36, 26);
-  ctx.fill();
+  ctx.strokeStyle = ((f % 36) < 4) ? "#ff3df0" : "#3a4252";
   ctx.stroke();
-  ctx.fillStyle = (f % 4 === 0) ? "#ff3b6a" : "#2a303c";
+  var on = (f % 16) < 8;
+  ctx.fillStyle = on ? "#ff3b6a" : "#2c3340";
   ctx.beginPath();
-  ctx.arc(0, -ih / 2 - 8, 3.5, 0, Math.PI * 2);
+  ctx.arc(r.x + r.w / 2, r.y + 12, 3, 0, Math.PI * 2);
   ctx.fill();
+  var screen = { x: r.x + 12, y: r.y + 22, w: r.w - 24, h: r.h - 34 };
+  rounded(screen.x, screen.y, screen.w, screen.h, 8);
+  ctx.fillStyle = "#070b14";
+  ctx.fill();
+  label("QQQ  " + fmt(money(15, 1, f >> 3)), screen.x + 8, screen.y + 12, 11, "#9dffe4", "left");
+  var dots = 8;
+  var i;
+  for (i = 0; i < dots; i++) {
+    var lit = ((f + i * 3) % 10) < 5;
+    ctx.fillStyle = lit ? COLORS[i % COLORS.length] : "#1b2830";
+    ctx.beginPath();
+    ctx.arc(screen.x + 16 + i * 16, screen.y + 28, lit ? 4 : 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  var plot = { x: screen.x + 8, y: screen.y + 40, w: screen.w - 16, h: Math.max(20, screen.h - 52) };
+  ctx.strokeStyle = "#3ee0ff";
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.rect(-iw / 2, -ih / 2, iw, ih);
+  var n = Math.min(24, candles.length);
+  var start = candles.length - n;
+  for (i = 0; i < n; i++) {
+    var x = plot.x + (i / Math.max(1, n - 1)) * plot.w;
+    var y = plot.y + (1 - candles[start + i].c) * plot.h;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function drawLog(r, f) {
+  rounded(r.x, r.y, r.w, r.h, 8);
+  ctx.fillStyle = "#070b14";
+  ctx.fill();
+  ctx.strokeStyle = "#1d4638";
+  ctx.stroke();
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
   ctx.clip();
-  ctx.translate(-iw / 2, -ih / 2);
-  drawTerminal(0, 0, iw, ih, f * 2 + 90, true);
+  var line = 16;
+  var scroll = (f % 18) * (line / 18);
+  var rows = Math.ceil(r.h / line) + 2;
+  var i;
+  for (i = 0; i < rows; i++) {
+    var idx = logLines.length - 1 - i;
+    if (idx < 0) break;
+    var y = r.y + 6 + i * line - scroll;
+    label(logLines[idx], r.x + 10, y + 8, 12, COLORS[idx % COLORS.length], "left");
+  }
   ctx.restore();
 }
 
-function drawStatus(f) {
-  var label = ((f >> 3) % 2 === 0) ? "NO BROKER" : "LIGHTS ONLY";
-  ctx.font = "bold 11px ui-monospace, monospace";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "middle";
-  var tw = 118;
-  var x = W - tw - 10;
-  var y = 8;
-  ctx.fillStyle = (f % 4 === 0) ? "#ff3b6a" : "rgba(0,0,0,0.55)";
-  rounded(x, y, tw, 22, 4);
+function drawBanner(r, f) {
+  var flash = (f % 20) < 6;
+  rounded(r.x, r.y, r.w, r.h, 6);
+  ctx.fillStyle = flash ? "#ff3b6a" : "#241018";
   ctx.fill();
-  ctx.strokeStyle = color(f);
+  ctx.strokeStyle = flash ? "#ffe14a" : "#ff3df0";
   ctx.stroke();
-  ctx.fillStyle = "#f4fff8";
-  ctx.fillText(label, x + tw - 8, y + 11);
-  ctx.textAlign = "left";
+  label(BANNERS[bannerIx % BANNERS.length], r.x + 12, r.y + r.h / 2, 13, "#fff6f8", "left");
+  var bw = 88;
+  var bx = r.x + r.w - bw - 8;
+  var by = r.y + 6;
+  rounded(bx, by, bw, r.h - 12, 4);
+  ctx.fillStyle = "#ffe14a";
+  ctx.fill();
+  label("Continue", bx + bw / 2, r.y + r.h / 2, 12, "#1a1008", "center");
+  hit(r.x, r.y, r.w, r.h, function () {
+    bannerIx = (bannerIx + 1) % BANNERS.length;
+  });
 }
 
-var hits = [];
+function drawToast(f) {
+  var msg = TOASTS[toastIx % TOASTS.length];
+  var w = Math.min(340, W - 24);
+  var h = 64;
+  var x = W - w - 12;
+  var y = 78;
+  var flash = (f % 16) < 4;
+  rounded(x, y, w, h, 8);
+  ctx.fillStyle = flash ? "#3a1020" : "#140c18";
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = flash ? "#ffe14a" : "#ff3df0";
+  ctx.stroke();
+  label(msg[0], x + 12, y + 18, 14, "#ffe14a", "left");
+  label(msg[1], x + 12, y + 40, 12, "#ffd0dc", "left");
+  rounded(x + w - 78, y + 18, 64, 28, 4);
+  ctx.fillStyle = "#ff3b6a";
+  ctx.fill();
+  label(msg[2], x + w - 46, y + 32, 12, "#1a0810", "center");
+  hit(x + w - 78, y + 18, 64, 28, function () {
+    toastIx = (toastIx + 1) % TOASTS.length;
+  });
+  hit(x + w - 28, y + 4, 22, 18, function () {
+    toastIx = (toastIx + 1) % TOASTS.length;
+  });
+  label("x", x + w - 16, y + 13, 12, "#ffd0dc", "center");
+}
 
 function drawModal(f) {
-  var w = Math.min(360, W - 24);
-  var h = 132;
-  var x = (W - w) / 2 + Math.sin(f * 0.35) * 24;
-  var y = H * 0.38 + Math.cos(f * 0.28) * 18;
-  var flash = (f % 8) < 3;
-  ctx.globalAlpha = 1;
+  var show = f > modalHideUntil && (Math.floor(f / 220) % 2 === 0) && (f % 220) < 100;
+  if (!show) return;
+  var w = Math.min(360, W - 40);
+  var h = 150;
+  var x = (W - w) / 2;
+  var y = H * 0.42;
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(0, 0, W, H);
+  var flash = (f % 10) < 3;
   rounded(x, y, w, h, 10);
-  ctx.fillStyle = flash ? "#3a1020" : "#120814";
+  ctx.fillStyle = "#120814";
   ctx.fill();
   ctx.lineWidth = 3;
   ctx.strokeStyle = flash ? "#ffe14a" : "#ff3b6a";
   ctx.stroke();
-  ctx.font = "bold 16px ui-monospace, monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = "#ffe14a";
-  ctx.fillText("Still there?", x + 14, y + 26);
-  ctx.font = "12px ui-monospace, monospace";
-  ctx.fillStyle = "#ffd5e0";
-  ctx.fillText("Close does not close. " + WORDS[f % WORDS.length] + " " + fmt(money(f, 3, f)), x + 14, y + 52);
-  var bw = (w - 42) / 2;
-  rounded(x + 14, y + 74, bw, 36, 6);
+  label("Still there?", x + 16, y + 28, 18, "#ffe14a", "left");
+  label("Close does not close. " + WORDS[f % WORDS.length] + " " + fmt(money(f, 3, f >> 2)), x + 16, y + 58, 12, "#ffd5e0", "left");
+  var bw = (w - 48) / 2;
+  rounded(x + 16, y + 88, bw, 36, 6);
   ctx.fillStyle = "#39ff88";
   ctx.fill();
-  rounded(x + 28 + bw, y + 74, bw, 36, 6);
+  label("Close", x + 16 + bw / 2, y + 106, 14, "#062014", "center");
+  rounded(x + 32 + bw, y + 88, bw, 36, 6);
   ctx.fillStyle = "#ff3df0";
   ctx.fill();
-  ctx.fillStyle = "#062014";
-  ctx.textAlign = "center";
-  ctx.font = "bold 14px ui-monospace, monospace";
-  ctx.fillText("Close", x + 14 + bw / 2, y + 92);
-  ctx.fillStyle = "#1a0814";
-  ctx.fillText("Also close", x + 28 + bw + bw / 2, y + 92);
-  ctx.textAlign = "left";
-  function nope() {
-    var n;
-    for (n = 0; n < 10; n++) {
-      alerts.push({
-        x: x + unit(frame + n, 2) * w,
-        y: y + unit(frame + n, 4) * 80,
-        life: 30,
-        word: WORDS[(frame + n) % WORDS.length],
-        n: fmt(money(frame + n, n, frame)),
-        c: color(frame + n)
+  label("Also close", x + 32 + bw + bw / 2, y + 106, 14, "#1a0814", "center");
+  function nope() { modalHideUntil = frame + 28; }
+  hit(x + 16, y + 88, bw, 36, nope);
+  hit(x + 32 + bw, y + 88, bw, 36, nope);
+}
+
+function drawBill(b) {
+  ctx.save();
+  ctx.translate(b.x, b.y);
+  ctx.rotate(b.rot);
+  ctx.fillStyle = b.tone === 0 ? "#39ff88" : (b.tone === 1 ? "#b6ff4a" : "#ffe14a");
+  ctx.strokeStyle = "#062014";
+  ctx.lineWidth = 1.5;
+  rounded(-b.w / 2, -b.h / 2, b.w, b.h, 3);
+  ctx.fill();
+  ctx.stroke();
+  label("$", 0, 1, Math.max(9, b.h * 0.7), "#062014", "center");
+  ctx.restore();
+}
+
+function drawMoney(f, anchor) {
+  var pw = 168;
+  var ph = 72;
+  var x = W - pw - 14;
+  var y = anchor.y - ph - 8;
+  var i;
+  if ((f % 3) === 0 && bills.length < 80) {
+    var burst = (f % 15 === 0) ? 4 : 1;
+    for (i = 0; i < burst; i++) {
+      var ang = unit(f + i, 6) * Math.PI * 2;
+      var speed = 3.5 + unit(f + i, 8) * 9;
+      bills.push({
+        x: x + 36,
+        y: y + 16,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed - 1.5,
+        rot: unit(f, i) * 6,
+        spin: (unit(f + i, 4) - 0.5) * 0.4,
+        w: 22 + unit(f + i, 2) * 26,
+        h: 12 + unit(f + i, 3) * 10,
+        tone: (f + i) % 3
       });
     }
   }
-  hits.push({ x: x + 14, y: y + 74, w: bw, h: 36, fn: nope });
-  hits.push({ x: x + 28 + bw, y: y + 74, w: bw, h: 36, fn: nope });
+  for (i = 0; i < bills.length; i++) {
+    var b = bills[i];
+    b.x += b.vx;
+    b.y += b.vy;
+    b.vy += 0.03;
+    b.rot += b.spin;
+    if (b.x < 12 || b.x > W - 12) b.vx *= -1;
+    if (b.y < 12 || b.y > H - 12) b.vy *= -0.9;
+    b.x = Math.max(10, Math.min(W - 10, b.x));
+    b.y = Math.max(10, Math.min(H - 10, b.y));
+    if (unit(i, f >> 5) > 0.96) {
+      b.vx = (unit(i, f) - 0.5) * 14;
+      b.vy = (unit(i + 3, f) - 0.5) * 12;
+    }
+    drawBill(b);
+  }
+  var shake = (f % 3) - 1;
+  ctx.save();
+  ctx.translate(shake, (f % 2));
+  rounded(x, y, pw, ph, 10);
+  ctx.fillStyle = "#10141c";
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = (f % 4 === 0) ? "#39ff88" : "#ffe14a";
+  ctx.stroke();
+  ctx.fillStyle = "#39ff88";
+  ctx.fillRect(x + 14, y + 12, 90, 8 + (f % 3));
+  ctx.fillStyle = "#062014";
+  ctx.fillRect(x + 18, y + 14, 68, 3);
+  label("BRR" + (f % 2 ? "R" : "RR"), x + 16, y + 46, 18 + (f % 5), "#ffe14a", "left");
+  label("PRINTER", x + 96, y + 28, 11, "#ff3b6a", "left");
+  ctx.restore();
 }
 
 function draw(f) {
   hits = [];
-  drawTerminal(0, 0, W, H, f, false);
-  drawModal(f);
+  seed();
+  var L = layout();
+  ctx.fillStyle = "#070b12";
+  ctx.fillRect(0, 0, W, H);
+  drawTicker(L.ticker, f);
+  drawPills(L.pills, f);
+  drawPrice(L.price, f);
+  drawChart(L.chart, f);
+  drawBubbles(L.bubbles, f);
+  drawGauges(L.gauges, f);
+  drawBook(L.book, f);
+  drawBars(L.bars, f);
+  drawIpad(L.ipad, f);
+  drawLog(L.log, f);
+  drawBanner(L.banner, f);
+  drawMoney(f, L.banner);
+  if (!L.compact) {
+    drawToast(f);
+    drawModal(f);
+  } else {
+    drawModal(f);
+  }
 }
 
 function loop() {
   raf = requestAnimationFrame(loop);
   if (userPaused || hidden) return;
   frame += 1;
+  step(frame);
   draw(frame);
 }
 
@@ -649,7 +720,6 @@ function setPaused(next) {
   userPaused = next;
   pauseBtn.textContent = userPaused ? "Play" : "Pause";
   pauseBtn.classList.toggle("is-paused", userPaused);
-  if (!userPaused && !raf) loop();
 }
 
 pauseBtn.addEventListener("click", function (event) {
@@ -658,34 +728,24 @@ pauseBtn.addEventListener("click", function (event) {
 });
 
 document.addEventListener("keydown", function (event) {
-  if (event.key === "p" || event.key === "P" || event.key === "Escape") {
-    setPaused(!userPaused);
-  }
+  if (event.key === "p" || event.key === "P" || event.key === "Escape") setPaused(!userPaused);
 });
 
 canvas.addEventListener("pointerdown", function (event) {
   var rect = canvas.getBoundingClientRect();
   var x = event.clientX - rect.left;
   var y = event.clientY - rect.top;
-  var hi;
-  for (hi = hits.length - 1; hi >= 0; hi--) {
-    var h = hits[hi];
+  var i;
+  for (i = hits.length - 1; i >= 0; i--) {
+    var h = hits[i];
     if (x >= h.x && x <= h.x + h.w && y >= h.y && y <= h.y + h.h) {
       h.fn();
       draw(frame);
       return;
     }
   }
-  for (var i = 0; i < 14; i++) {
-    alerts.push({
-      x: x + (unit(frame + i, 8) - 0.5) * 220,
-      y: y + (unit(frame + i, 9) - 0.5) * 120,
-      life: 26,
-      word: WORDS[(frame + i) % WORDS.length],
-      n: fmt(money(frame + i, i, frame)),
-      c: color(frame + i)
-    });
-  }
+  bannerIx = (bannerIx + 1) % BANNERS.length;
+  draw(frame);
 });
 
 document.addEventListener("visibilitychange", function () {
@@ -698,6 +758,7 @@ window.addEventListener("resize", function () {
 });
 
 fit();
+seed();
 if (reduceMotion) setPaused(true);
 draw(frame);
 loop();
