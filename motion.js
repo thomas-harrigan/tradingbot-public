@@ -12,7 +12,7 @@ var PANEL = "#161a1e";
 var LINE = "#2b3139";
 var TEXT = "#eaecef";
 var MUTED = "#848e9c";
-var BUILD = "wall-13";
+var BUILD = "wall-14";
 
 var STOCKS = [
   ["NVDA", 128.4], ["AAPL", 189.15], ["MSFT", 418.55], ["AMZN", 186.2],
@@ -53,8 +53,9 @@ var bills = [];
 var billTarget = 16;
 var stockFlash = 0;
 var stockSwapAt = 2;
-var modalKick = 0;
 var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+var alerts = [];
+var nextAlert = 0.35;
 
 var billFront = new Image();
 var billBack = new Image();
@@ -62,6 +63,20 @@ billFront.onload = onBillImage;
 billBack.onload = onBillImage;
 billFront.src = "bill-front.jpg";
 billBack.src = "bill-back.jpg";
+
+var wingFrames = [new Image(), new Image(), new Image()];
+var boomFrames = [new Image(), new Image(), new Image(), new Image()];
+
+function loadFrames(list, prefix) {
+  var i;
+  for (i = 0; i < list.length; i++) {
+    list[i].onload = onBillImage;
+    list[i].src = prefix + i + ".png";
+  }
+}
+
+loadFrames(wingFrames, "wings-");
+loadFrames(boomFrames, "boom-");
 
 function onBillImage() {
   if (started && (userPaused || hidden)) draw(frame);
@@ -307,8 +322,8 @@ function step(dt) {
     else quotes[0].px = nudgeLast(candles, quotes[0].open);
   }
   for (i = 0; i < coins.length; i++) stepCoin(coins[i]);
-  if (modalKick > 0) modalKick -= 1;
   stepBills(dt);
+  stepAlerts(dt);
 }
 
 function stepCoin(c) {
@@ -320,31 +335,6 @@ function stepCoin(c) {
   c.tick += 1;
   if (c.tick % 10 === 0) c.px = pushCandle(c.candles, c.px);
   else c.px = nudgeLast(c.candles, c.open);
-}
-
-function makeScraps(b) {
-  var colors = ["#178a45", "#bfe8d0", "#f4ead2", "#e2b656", "#f7f3e6", "#0e6a36", "#fff6d8"];
-  var scraps = [];
-  var n = 14 + Math.floor(Math.random() * 6);
-  var i;
-  for (i = 0; i < n; i++) {
-    var ang = (Math.PI * 2 * i) / n + Math.random() * 0.35;
-    var spd = 90 + Math.random() * 240;
-    scraps.push({
-      x: b.x + Math.cos(ang) * b.w * 0.28,
-      y: b.y + Math.sin(ang) * b.h * 0.28,
-      vx: Math.cos(ang) * spd,
-      vy: Math.sin(ang) * spd,
-      w: 12 + Math.random() * 22,
-      h: 7 + Math.random() * 12,
-      rot: Math.random() * Math.PI,
-      spin: (Math.random() - 0.5) * 10,
-      color: colors[i % colors.length],
-      life: 0.32 + Math.random() * 0.28,
-      age: 0
-    });
-  }
-  return scraps;
 }
 
 function resolveBill(b) {
@@ -359,7 +349,6 @@ function resolveBill(b) {
   }
   b.state = "lose";
   b.boom = 1;
-  b.scraps = makeScraps(b);
 }
 
 function placeBill(b, scatter) {
@@ -413,7 +402,6 @@ function makeBill(scatter) {
     phase: 0,
     scale: 1,
     alpha: 1,
-    scraps: null,
     boom: 0,
     launched: 0,
     dead: false
@@ -482,21 +470,9 @@ function stepWin(b, dt) {
 
 function stepLose(b, dt) {
   b.phase += dt;
-  b.scale = 1 + b.phase * 1.35;
-  b.alpha = b.phase >= 0.4 ? 0 : 1 - b.phase / 0.4;
-  b.boom = b.phase < 0.08 ? 1 - b.phase / 0.08 : 0;
-  var i, s;
-  if (b.scraps) {
-    for (i = 0; i < b.scraps.length; i++) {
-      s = b.scraps[i];
-      s.age += dt;
-      s.x += s.vx * dt;
-      s.y += s.vy * dt;
-      s.vy += 40 * dt;
-      s.rot += s.spin * dt;
-    }
-  }
-  if (b.phase > 0.7) b.dead = true;
+  b.scale = 1;
+  b.alpha = b.phase >= 0.12 ? 0 : 1 - b.phase / 0.12;
+  if (b.phase > 1.05) b.dead = true;
 }
 
 function stepBills(dt) {
@@ -926,57 +902,95 @@ function drawBook(r) {
   ctx.restore();
 }
 
-function drawNote() {
-  var n = noteBox();
-  var w = n.w;
-  var h = n.h;
-  var x = n.x + (modalKick ? Math.sin(modalKick) * 6 : 0);
-  var y = n.y;
-  rounded(x, y, w, h, 8);
-  ctx.fillStyle = "#1c1418";
-  ctx.fill();
-  ctx.lineWidth = 1;
-  ctx.strokeStyle = "#5a3040";
-  ctx.stroke();
-  text("Still there?", x + 12, y + 20, 14, "#ffe14a", "left");
-  text("Close does not close.", x + 12, y + 42, 12, "#ffd5e0", "left");
-  rounded(x + w - 78, y + 40, 64, 26, 4);
-  ctx.fillStyle = UP;
-  ctx.fill();
-  text("Close", x + w - 46, y + 53, 12, "#062014", "center");
-  hit(x + w - 78, y + 40, 64, 26, function () { modalKick = 10; });
+function trackText(str, cx, y, size) {
+  ctx.font = "700 " + size + "px Georgia, 'Times New Roman', 'Liberation Serif', Times, serif";
+  ctx.fillStyle = "#1a1a1a";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  var letters = str.split("");
+  var gap = size * 0.14;
+  var widths = [];
+  var total = 0;
+  var i;
+  for (i = 0; i < letters.length; i++) {
+    widths[i] = ctx.measureText(letters[i]).width;
+    total += widths[i];
+  }
+  if (letters.length > 1) total += gap * (letters.length - 1);
+  var x = cx - total / 2;
+  for (i = 0; i < letters.length; i++) {
+    ctx.fillText(letters[i], x, y);
+    x += widths[i] + gap;
+  }
+  return total;
 }
 
-function wingSide(side, w, h, grow) {
-  var i;
+function drawAd() {
+  var n = noteBox();
+  var x = n.x;
+  var y = n.y;
+  var w = n.w;
+  var h = n.h;
   ctx.save();
-  ctx.translate(side * w * 0.46, -h * 0.18);
-  for (i = 0; i < 4; i++) {
-    var ang = side * (0.15 + i * 0.4);
-    var len = h * (0.9 + i * 0.2) * grow;
-    var wid = h * 0.2 * grow;
-    ctx.save();
-    ctx.rotate(ang);
-    ctx.beginPath();
-    ctx.ellipse(0, -len * 0.5, Math.max(3.5, wid), Math.max(8, len * 0.5), 0, 0, Math.PI * 2);
-    ctx.fillStyle = i === 2 ? "#ffffff" : "#e9f1f8";
-    ctx.fill();
-    ctx.strokeStyle = "rgba(70, 92, 114, 0.55)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(0, -4);
-    ctx.lineTo(0, -len + wid);
-    ctx.stroke();
-    ctx.restore();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  ctx.fillStyle = "#f3efe4";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#1a1a1a";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, w - 1), Math.max(0, h - 1));
+  if (w > 24 && h > 16) {
+    ctx.strokeRect(x + 3.5, y + 3.5, Math.max(0, w - 7), Math.max(0, h - 7));
   }
+  ctx.fillStyle = "#1a1a1a";
+  ctx.textBaseline = "middle";
+  var nameSize = w < 200 ? 6 : 7;
+  trackText("THE WALL STREET JOURNAL", x + w / 2, y + 13, nameSize);
+  ctx.beginPath();
+  ctx.moveTo(x + 8, y + 19.5);
+  ctx.lineTo(x + w - 8, y + 19.5);
+  ctx.moveTo(x + 8, y + 21.5);
+  ctx.lineTo(x + w - 8, y + 21.5);
+  ctx.stroke();
+  ctx.textAlign = "left";
+  ctx.font = "italic 700 12px Georgia, 'Times New Roman', 'Liberation Serif', Times, serif";
+  ctx.fillText("Landlord", x + 10, y + 33);
+  ctx.font = "400 10px Georgia, 'Times New Roman', 'Liberation Serif', Times, serif";
+  ctx.fillText("Has an apartment. Will not show it.", x + 10, y + 48);
+  ctx.fillText("Will not name the street or the rent.", x + 10, y + 61);
   ctx.restore();
 }
 
-function drawWings(w, h, grow) {
-  if (grow <= 0.02) return;
-  wingSide(-1, w, h, grow);
-  wingSide(1, w, h, grow);
+function drawWingGif(b) {
+  if (b.wing <= 0.02) return;
+  var cycle = [0, 1, 2, 1];
+  var img = wingFrames[cycle[Math.floor(b.phase * 6) % 4]];
+  if (!imageReady(img)) return;
+  var ww = b.w * 2.85 * b.wing;
+  var wh = ww * (img.naturalHeight / img.naturalWidth);
+  var smooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, -ww / 2, -wh / 2, ww, wh);
+  ctx.imageSmoothingEnabled = smooth;
+}
+
+function drawBoom(b) {
+  var ready = [];
+  var i;
+  for (i = 0; i < boomFrames.length; i++) {
+    if (imageReady(boomFrames[i])) ready.push(boomFrames[i]);
+  }
+  if (!ready.length) return;
+  var idx = Math.min(ready.length - 1, Math.floor(b.phase / 0.22));
+  var img = ready[idx];
+  var size = b.w * 3.15;
+  var alpha = b.phase > 0.82 ? Math.max(0, 1 - (b.phase - 0.82) / 0.23) : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(img, b.x - size / 2, b.y - size / 2, size, size);
+  ctx.restore();
 }
 
 function billFace(b) {
@@ -984,30 +998,8 @@ function billFace(b) {
 }
 
 function drawOneBill(b) {
-  var i, s, a;
-  if (b.scraps) {
-    for (i = 0; i < b.scraps.length; i++) {
-      s = b.scraps[i];
-      a = 1 - s.age / s.life;
-      if (a <= 0) continue;
-      ctx.save();
-      ctx.globalAlpha = a;
-      ctx.translate(s.x, s.y);
-      ctx.rotate(s.rot);
-      ctx.fillStyle = s.color;
-      ctx.fillRect(-s.w / 2, -s.h / 2, s.w, s.h);
-      ctx.restore();
-    }
-  }
-  if (b.boom > 0) {
-    ctx.save();
-    ctx.globalAlpha = b.boom;
-    ctx.fillStyle = "#fff4cc";
-    ctx.beginPath();
-    ctx.arc(b.x, b.y, Math.max(10, b.w * 0.16), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-  }
+  if (b.state === "lose") drawBoom(b);
+  if (b.state === "lose" && b.alpha <= 0.02) return;
   var img = billFace(b);
   if (!imageReady(img)) return;
   var sx = Math.abs(Math.cos(b.tumble));
@@ -1024,14 +1016,153 @@ function drawOneBill(b) {
   ctx.translate(b.x, b.y);
   ctx.scale(sx * b.scale, b.scale);
   ctx.globalAlpha = b.alpha;
+  if (b.wing > 0) drawWingGif(b);
   ctx.drawImage(img, -b.w / 2, -b.h / 2, b.w, b.h);
-  if (b.wing > 0) drawWings(b.w, b.h, b.wing);
   ctx.restore();
 }
 
 function drawMoney() {
   var i;
   for (i = 0; i < bills.length; i++) drawOneBill(bills[i]);
+}
+
+function boxesOverlap(a, b, pad) {
+  var p = pad || 0;
+  return a.x < b.x + b.w + p && a.x + a.w + p > b.x && a.y < b.y + b.h + p && a.y + a.h + p > b.y;
+}
+
+function commas(n) {
+  var s = String(n);
+  var out = "";
+  var i;
+  for (i = 0; i < s.length; i++) {
+    if (i > 0 && (s.length - i) % 3 === 0) out += ",";
+    out += s.charAt(i);
+  }
+  return out;
+}
+
+function makeAlertText() {
+  var stock = Math.random() < 0.62;
+  var pool = stock ? STOCKS : COINS;
+  var pick = pool[Math.floor(Math.random() * pool.length)];
+  var roll = Math.random();
+  if (roll < 0.22) {
+    var pct = 1 + Math.random() * 48;
+    var up = Math.random() < 0.5;
+    return {
+      k: "TRADE ALERT",
+      a: pick[0] + "  " + (up ? "+" : "-") + pct.toFixed(1) + "%",
+      b: "In the last second",
+      tone: up ? "up" : "down"
+    };
+  }
+  if (roll < 0.36) {
+    return { k: "TRADE ALERT", a: pick[0] + " halt", b: "Still printing", tone: "down" };
+  }
+  if (roll < 0.5) {
+    return { k: "TRADE ALERT", a: "Stop hit  " + pick[0], b: "The stop was a rumor", tone: "down" };
+  }
+  var side = Math.random() < 0.5 ? "BUY" : "SELL";
+  var qty = stock
+    ? [10, 40, 100, 400, 1000, 2500][Math.floor(Math.random() * 6)]
+    : [100000, 250000, 1000000, 5000000][Math.floor(Math.random() * 4)];
+  var px = pick[1] * (0.9 + Math.random() * 0.2);
+  var status = ["FILLED", "WORKING", "PARTIAL", "CANCELED", "REJECTED"][Math.floor(Math.random() * 5)];
+  return {
+    k: "TRADE ALERT",
+    a: side + "  " + commas(qty) + "  " + pick[0],
+    b: "@ " + fmt(px) + "   " + status,
+    tone: side === "BUY" ? "up" : "down"
+  };
+}
+
+function placeAlert(w, h) {
+  var print = printerBox();
+  var note = noteBox();
+  var i, x, y, box;
+  for (i = 0; i < 24; i++) {
+    x = 8 + Math.random() * Math.max(8, W - w - 16);
+    y = 42 + Math.random() * Math.max(8, H * 0.72 - h);
+    box = { x: x, y: y, w: w, h: h };
+    if (boxesOverlap(box, print, 6)) continue;
+    if (boxesOverlap(box, note, 6)) continue;
+    if (x < 84 && y < 40) continue;
+    return box;
+  }
+  return { x: 16, y: 46, w: w, h: h };
+}
+
+function spawnAlert() {
+  var copy = makeAlertText();
+  var w = Math.min(248, Math.max(160, W - 24));
+  var h = 54;
+  var at = placeAlert(w, h);
+  alerts.push({
+    k: copy.k,
+    a: copy.a,
+    b: copy.b,
+    tone: copy.tone,
+    x: at.x,
+    y: at.y,
+    w: w,
+    h: h,
+    age: 0,
+    life: 2
+  });
+  if (alerts.length > 4) alerts = alerts.slice(alerts.length - 4);
+}
+
+function stepAlerts(dt) {
+  nextAlert -= dt;
+  if (nextAlert <= 0) {
+    spawnAlert();
+    nextAlert = 0.55 + Math.random() * 1.25;
+  }
+  var next = [];
+  var i;
+  for (i = 0; i < alerts.length; i++) {
+    alerts[i].age += dt;
+    if (alerts[i].age < alerts[i].life) next.push(alerts[i]);
+  }
+  alerts = next;
+}
+
+function fitLine(str, size, maxW) {
+  ctx.font = "600 " + size + "px ui-monospace, monospace";
+  while (size > 8 && ctx.measureText(str).width > maxW) {
+    size -= 1;
+    ctx.font = "600 " + size + "px ui-monospace, monospace";
+  }
+  return size;
+}
+
+function drawAlerts() {
+  var i, a, fade;
+  for (i = 0; i < alerts.length; i++) {
+    a = alerts[i];
+    a.x = Math.max(8, Math.min(a.x, W - a.w - 8));
+    a.y = Math.max(40, Math.min(a.y, H - a.h - 8));
+    fade = a.age < 0.08 ? a.age / 0.08 : 1;
+    ctx.save();
+    ctx.globalAlpha = fade;
+    ctx.beginPath();
+    ctx.rect(a.x, a.y, a.w, a.h);
+    ctx.clip();
+    rounded(a.x, a.y, a.w, a.h, 6);
+    ctx.fillStyle = "#12161c";
+    ctx.fill();
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = a.tone === "up" ? UP : DOWN;
+    ctx.stroke();
+    ctx.fillStyle = a.tone === "up" ? UP : DOWN;
+    ctx.fillRect(a.x, a.y, 3, a.h);
+    var maxW = a.w - 22;
+    text(a.k, a.x + 12, a.y + 13, fitLine(a.k, 10, maxW), MUTED, "left");
+    text(a.a, a.x + 12, a.y + 29, fitLine(a.a, 13, maxW), TEXT, "left");
+    text(a.b, a.x + 12, a.y + 44, fitLine(a.b, 11, maxW), a.tone === "up" ? UP : DOWN, "left");
+    ctx.restore();
+  }
 }
 
 function draw(f) {
@@ -1045,8 +1176,9 @@ function draw(f) {
   drawChart(L.chart);
   drawCoinStrip(L);
   drawBook(L.book);
-  drawNote();
+  drawAd();
   drawMoney();
+  drawAlerts();
 }
 
 function loop(ts) {
