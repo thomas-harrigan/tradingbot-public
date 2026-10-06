@@ -6,8 +6,9 @@ var pauseBtn = document.getElementById("pause");
 
 var COLORS = ["#39ff88", "#ff3b6a", "#3ee0ff", "#ff3df0", "#ffe14a", "#9b5cff", "#ff7a18"];
 var RGB = COLORS.map(hexToRgb);
-var WORDS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVGO", "MU", "ARM", "SMCI", "PLTR", "COIN", "SPY", "QQQ", "NFLX", "INTC", "BA", "CAT"];
-var BUILD = "wall-3";
+var WORDS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVGO", "MU", "ARM", "SMCI", "PLTR", "COIN", "SPY", "QQQ", "NFLX", "INTC", "BA", "CAT", "ORCL", "CRM", "ADBE", "NOW", "SNOW", "PANW", "CRWD", "DELL", "ASML", "TSM", "QCOM", "AMAT", "LRCX", "KLAC", "SNPS", "CDNS", "UBER", "ABNB", "DIS", "NKE", "COST", "WMT", "HD", "DE", "GE", "HON", "ETN", "ANET", "SHOP", "MELI"];
+var SCALES = [0.42, 1.17, 3.84, 8.6, 18.25, 47.5, 88.4, 126.8, 188.2, 247.15, 412, 891.4, 1420, 2406, 6840, 12850];
+var BUILD = "wall-5";
 var KINDS = ["candles", "bubbles", "bars", "gauges", "radar", "book", "scribble", "meters"];
 
 var frame = 0;
@@ -45,11 +46,21 @@ function unit(a, b) {
   return hash(Math.imul(a + 1, 0x9e3779b1) ^ Math.imul(b + 17, 0x85ebca6b));
 }
 
-function wild(a, b) {
-  var u = unit(a, b);
-  var gate = unit(a + 31, b + 5);
-  if (gate > 0.62) return gate > 0.82 ? 0.02 + unit(a, b + 2) * 0.08 : 0.9 + unit(a, b + 4) * 0.1;
-  return u;
+function money(id, salt, f) {
+  var scale = SCALES[Math.abs(id + salt * 3) % SCALES.length];
+  var slam = unit(id + salt * 11, f);
+  var mult = 0.72 + unit(id * 5 + salt, f + 9) * 0.55;
+  if (slam > 0.9) mult = 6 + unit(id, f + salt) * 18;
+  else if (slam < 0.08) mult = 0.015 + unit(id + 2, f + salt) * 0.05;
+  else if (slam > 0.78) mult = 1.8 + unit(id + 4, f) * 3.2;
+  return scale * mult;
+}
+
+function fmt(v) {
+  if (v >= 1000) return v.toFixed(0);
+  if (v >= 100) return v.toFixed(1);
+  if (v >= 1) return v.toFixed(2);
+  return v.toFixed(4);
 }
 
 function color(i) {
@@ -120,8 +131,7 @@ function drawTicker(x, y, w, h, dir, f) {
   var ti;
   for (ti = 0; ti < 10; ti++) {
     var sym = WORDS[(f + ti * 3) % WORDS.length];
-    var px = (3 + unit(ti + dir * 20, f) * 1800);
-    chunk += "   " + sym + " " + (px > 999 ? px.toFixed(0) : px.toFixed(2));
+    chunk += "   " + sym + " " + fmt(money(ti + dir * 20, ti, f));
   }
   var tw = ctx.measureText(chunk).width || 1;
   var offset = (dir * f * 7) % tw;
@@ -182,31 +192,74 @@ function chrome(x, y, w, h, id, f) {
   ctx.fillText(WORDS[id % WORDS.length], x + 20, y + 12);
   ctx.textAlign = "right";
   ctx.fillStyle = color(id + f);
-  var pxv = 2 + unit(id, f) * 2200 * (0.25 + unit(id + 4, f + 1));
-  ctx.fillText(pxv > 999 ? pxv.toFixed(0) : pxv.toFixed(2), x + w - 8, y + 12);
+  ctx.fillText(fmt(money(id, 0, f)), x + w - 8, y + 12);
   ctx.textAlign = "left";
   return { x: x + 6, y: y + 24, w: Math.max(4, w - 12), h: Math.max(4, h - 30) };
 }
 
 function drawCandles(box, id, f) {
-  var n = Math.max(6, Math.floor(box.w / 6));
+  var density = unit(id, 77);
+  var n;
+  if (density < 0.22) n = 3 + ((id + f) % 3);
+  else if (density > 0.82) n = Math.max(16, Math.floor(box.w / 3));
+  else n = Math.max(5, Math.floor(box.w / (4 + (id % 9))));
   var cw = box.w / n;
+  var mid = 0.12 + 0.76 * unit(id, 11);
   for (var i = 0; i < n; i++) {
-    var a = wild(id * 40 + i, f);
-    var b = wild(id * 40 + i, f + 7);
-    var hi = Math.max(a, b, wild(id * 40 + i, f + 13), wild(id * 40 + i, f + 19));
-    var lo = Math.min(a, b, wild(id * 40 + i, f + 23), wild(id * 40 + i, f + 29));
-    var up = b >= a;
+    var kind = Math.floor(unit(id * 13 + i * 17, f) * 6);
+    var open = mid;
+    var close = mid;
+    var hi = mid;
+    var lo = mid;
+    if (kind === 0) {
+      open = 0.35 + unit(id + i, f) * 0.3;
+      close = open + (unit(id, f + i) - 0.5) * 0.015;
+      hi = Math.min(0.99, open + 0.28 + 0.55 * unit(id + 2, f + i));
+      lo = Math.max(0.01, open - 0.28 - 0.5 * unit(id + 3, f + i));
+    } else if (kind === 1) {
+      open = unit(id + i, f) < 0.5 ? 0.04 : 0.9;
+      close = open < 0.5 ? 0.88 + unit(id, f + i) * 0.1 : 0.06 + unit(id, f + i) * 0.1;
+      hi = Math.max(open, close) + 0.008;
+      lo = Math.min(open, close) - 0.008;
+    } else if (kind === 2) {
+      lo = 0.03 + unit(id + i, f) * 0.12;
+      open = lo + 0.015;
+      close = lo + 0.03 + unit(id, f + i) * 0.07;
+      hi = 0.72 + unit(id + 4, f + i) * 0.26;
+    } else if (kind === 3) {
+      hi = 0.84 + unit(id + i, f) * 0.14;
+      open = hi - 0.02;
+      close = hi - 0.05 - unit(id, f + i) * 0.08;
+      lo = 0.02 + unit(id + 5, f + i) * 0.16;
+    } else if (kind === 4) {
+      var band = 0.08 + unit(id + i, f + 8) * 0.84;
+      open = band;
+      close = band + (unit(id, f + i) - 0.5) * 0.04;
+      hi = Math.min(0.995, Math.max(open, close) + 0.012);
+      lo = Math.max(0.005, Math.min(open, close) - 0.012);
+    } else {
+      var step = (unit(id + i, f) - 0.5) * (0.05 + 0.62 * unit(id, f + i));
+      if (unit(id + i, f + 3) > 0.84) step = (unit(id, i + f) > 0.5 ? 1 : -1) * (0.28 + 0.4 * unit(id, f));
+      close = Math.max(0.03, Math.min(0.97, open + step));
+      hi = Math.min(0.99, Math.max(open, close) + unit(id + i, f + 1) * (0.02 + 0.45 * unit(id, 19)));
+      lo = Math.max(0.01, Math.min(open, close) - unit(id + i, f + 2) * (0.02 + 0.45 * unit(id, 23)));
+    }
+    mid = Math.max(0.06, Math.min(0.94, close));
+    var up = close >= open;
     var px = box.x + i * cw + cw * 0.5;
+    var fat = unit(id + i, f + 6);
+    var bodyW = fat > 0.78 ? cw * 0.94 : (fat < 0.16 ? 1.2 : cw * 0.48);
     ctx.strokeStyle = up ? "#39ff88" : "#ff3b6a";
+    if ((i + id) % 7 === 0) ctx.strokeStyle = up ? "#ffe14a" : "#3ee0ff";
     ctx.fillStyle = ctx.strokeStyle;
+    ctx.lineWidth = fat > 0.9 ? 3 : 1;
     ctx.beginPath();
-    ctx.moveTo(px, box.y + (1 - hi) * box.h);
-    ctx.lineTo(px, box.y + (1 - lo) * box.h);
+    ctx.moveTo(px, box.y + (1 - Math.max(0, Math.min(1, hi))) * box.h);
+    ctx.lineTo(px, box.y + (1 - Math.max(0, Math.min(1, lo))) * box.h);
     ctx.stroke();
-    var top = box.y + (1 - Math.max(a, b)) * box.h;
-    var bh = Math.max(1.5, Math.abs(b - a) * box.h);
-    ctx.fillRect(px - Math.max(1, cw * 0.28), top, Math.max(2, cw * 0.56), bh);
+    var top = box.y + (1 - Math.max(0, Math.min(1, Math.max(open, close)))) * box.h;
+    var bh = Math.max(kind === 0 || kind === 4 ? 1 : 2, Math.abs(close - open) * box.h);
+    ctx.fillRect(px - bodyW / 2, top, Math.max(1, bodyW), bh);
   }
 }
 
@@ -246,7 +299,8 @@ function drawBars(box, id, f) {
   var n = Math.max(6, Math.floor(box.w / 8));
   var bw = box.w / n;
   for (var i = 0; i < n; i++) {
-    var h = 0.15 + 0.85 * unit(id + i, f);
+    var roll = unit(id + i, f);
+    var h = roll < 0.16 ? 0.012 + roll * 0.04 : (roll > 0.84 ? 0.9 + unit(id, f + i) * 0.1 : 0.08 + roll * 0.7);
     ctx.fillStyle = i % 2 ? "#ff3df0" : "#39ff88";
     if (((f + i) & 3) === 0) ctx.fillStyle = "#ffe14a";
     ctx.fillRect(box.x + i * bw + 1, box.y + box.h - h * box.h, Math.max(1, bw - 2), h * box.h);
@@ -318,12 +372,11 @@ function drawBook(box, id, f) {
     ctx.fillStyle = hot ? (i % 2 ? "rgba(255,59,106,0.85)" : "rgba(57,255,136,0.8)") : "rgba(0,0,0,0.25)";
     ctx.fillRect(box.x, box.y + i * rh, box.w, rh - 1);
     ctx.fillStyle = hot ? "#061018" : color(i + f);
-    var left = WORDS[(id + i) % WORDS.length];
-    var num = Math.floor(unit(id + i, f) * 9999);
+    var left = WORDS[(id + i * 5) % WORDS.length];
     ctx.textAlign = "left";
     ctx.fillText(left, box.x + 4, box.y + i * rh + rh / 2);
     ctx.textAlign = "right";
-    ctx.fillText(String(num).padStart(4, "0"), box.x + box.w - 4, box.y + i * rh + rh / 2);
+    ctx.fillText(fmt(money(id + i, i + 2, f)), box.x + box.w - 4, box.y + i * rh + rh / 2);
   }
   ctx.textAlign = "left";
 }
@@ -393,8 +446,7 @@ function drawLog(x, y, w, h, f) {
     ctx.fillStyle = color(id);
     var a = WORDS[id % WORDS.length];
     var b = WORDS[(id * 3) % WORDS.length];
-    var n = Math.floor(unit(i, f) * 0xffffff).toString(16);
-    ctx.fillText(a + "  " + b + "  " + n + "  " + WORDS[(id * 5) % WORDS.length], x + 8, yy);
+    ctx.fillText(a + "  " + fmt(money(id, i, f)) + "  " + b + "  " + fmt(money(id + 9, i, f)), x + 8, yy);
   }
   ctx.restore();
 }
@@ -406,7 +458,7 @@ function spawnAlerts(f) {
       y: unit(f, 2) * H * 0.8,
       life: 22 + (f % 18),
       word: WORDS[f % WORDS.length],
-      n: Math.floor(unit(f, 4) * 9999),
+      n: fmt(money(f, 4, f)),
       c: color(f)
     });
   }
@@ -442,7 +494,6 @@ function drawTerminal(x, y, w, h, f, nested) {
   ctx.beginPath();
   ctx.rect(x, y, w, h);
   ctx.clip();
-  ctx.translate(Math.sin(f * 1.3) * 5, Math.cos(f * 1.5) * 4);
 
   drawLeds(nested ? ledInset : ledMain, x, y, w, h, f);
   drawTicker(x, y, w, 18, 1, f);
@@ -464,16 +515,14 @@ function drawTerminal(x, y, w, h, f, nested) {
   var rows = Math.max(2, Math.floor(gridH / (nested ? 90 : 120)));
   var cw = w / cols;
   var rh = gridH / rows;
-  var shift = Math.floor(f / 16);
+  var pad = 5;
   for (var r = 0; r < rows; r++) {
     for (var c = 0; c < cols; c++) {
       var id = r * cols + c + (nested ? 80 : 0);
-      var kind = KINDS[(id + shift) % KINDS.length];
-      var pw = cw * (0.55 + 0.4 * Math.sin(f * 0.45 + id));
-      var ph = rh * (0.5 + 0.42 * Math.cos(f * 0.4 + id * 1.3));
-      var px = x + c * cw + (cw - pw) / 2 + Math.sin(f * 0.9 + id) * 14;
-      var py = top + r * rh + (rh - ph) / 2 + Math.cos(f * 1.05 + id) * 12;
-      drawWidget(kind, px, py, pw, ph, id + shift, f);
+      var kind = KINDS[id % KINDS.length];
+      var px = x + c * cw + pad;
+      var py = top + r * rh + pad;
+      drawWidget(kind, px, py, Math.max(8, cw - pad * 2), Math.max(8, rh - pad * 2), id, f);
     }
   }
 
@@ -489,12 +538,10 @@ function drawTerminal(x, y, w, h, f, nested) {
 function drawIpad(f) {
   var iw = Math.max(220, Math.min(520, W * 0.4));
   var ih = Math.max(160, Math.min(340, H * 0.42));
-  var cx = W * 0.68 + Math.sin(f * 0.08) * Math.min(140, W * 0.12);
-  var cy = H * 0.48 + Math.cos(f * 0.07) * Math.min(90, H * 0.1);
-  var rot = Math.sin(f * 0.05) * 0.16;
+  var cx = W * 0.72;
+  var cy = H * 0.56;
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(rot);
   ctx.fillStyle = "#141820";
   ctx.strokeStyle = (f % 6 === 0) ? "#ff3df0" : "#3c4454";
   ctx.lineWidth = 3;
@@ -553,7 +600,7 @@ function drawModal(f) {
   ctx.fillText("Still there?", x + 14, y + 26);
   ctx.font = "12px ui-monospace, monospace";
   ctx.fillStyle = "#ffd5e0";
-  ctx.fillText("Close does not close. " + WORDS[f % WORDS.length] + " " + (unit(f, 3) * 900).toFixed(2), x + 14, y + 52);
+  ctx.fillText("Close does not close. " + WORDS[f % WORDS.length] + " " + fmt(money(f, 3, f)), x + 14, y + 52);
   var bw = (w - 42) / 2;
   rounded(x + 14, y + 74, bw, 36, 6);
   ctx.fillStyle = "#39ff88";
@@ -576,7 +623,7 @@ function drawModal(f) {
         y: y + unit(frame + n, 4) * 80,
         life: 30,
         word: WORDS[(frame + n) % WORDS.length],
-        n: Math.floor(unit(n, frame) * 9999),
+        n: fmt(money(frame + n, n, frame)),
         c: color(frame + n)
       });
     }
@@ -635,7 +682,7 @@ canvas.addEventListener("pointerdown", function (event) {
       y: y + (unit(frame + i, 9) - 0.5) * 120,
       life: 26,
       word: WORDS[(frame + i) % WORDS.length],
-      n: Math.floor(unit(i, frame) * 9999),
+      n: fmt(money(frame + i, i, frame)),
       c: color(frame + i)
     });
   }
